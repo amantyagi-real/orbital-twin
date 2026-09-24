@@ -41,7 +41,10 @@ class AnomalyDetector:
 
     def __init__(self, model_dir: str = None):
         self.model_dir = model_dir or os.path.join(settings.MODELS_DIR, "anomaly")
-        os.makedirs(self.model_dir, exist_ok=True)
+        try:
+            os.makedirs(self.model_dir, exist_ok=True)
+        except OSError:
+            pass
         self.model_path = os.path.join(self.model_dir, "isolation_forest.joblib")
         self.scaler_path = os.path.join(self.model_dir, "scaler.joblib")
         
@@ -111,11 +114,13 @@ class AnomalyDetector:
         self.model.fit(X_scaled)
         
         # Serialize
-        joblib.dump(self.model, self.model_path)
-        joblib.dump(self.scaler, self.scaler_path)
+        try:
+            joblib.dump(self.model, self.model_path)
+            joblib.dump(self.scaler, self.scaler_path)
+            print(f"AnomalyDetector: Successfully trained and saved model to {self.model_path}")
+        except OSError as e:
+            print(f"AnomalyDetector: Warning - could not write model to disk ({e}). Keeping model in-memory.")
         self.is_ready = True
-        
-        print(f"AnomalyDetector: Successfully trained and saved model to {self.model_path}")
         return {
             "status": "ONLINE",
             "samples": len(X),

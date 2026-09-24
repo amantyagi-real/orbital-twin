@@ -56,8 +56,11 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const connectWebSocket = () => {
       if (unmounted) return;
+      const customWs = import.meta.env.VITE_WS_URL;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/telemetry`;
+      const wsUrl = customWs
+        ? (customWs.startsWith('ws') ? customWs : `${protocol}//${customWs}`).replace(/\/$/, '') + '/ws/telemetry'
+        : `${protocol}//${window.location.host}/ws/telemetry`;
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;

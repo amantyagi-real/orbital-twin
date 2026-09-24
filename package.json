@@ -1,0 +1,12 @@
+{
+  "name": "orbital-twin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI-Powered Spacecraft Digital Twin & Mission Intelligence Platform",
+  "scripts": {
+    "build": "npm --prefix frontend run build",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "lint": "npm --prefix frontend run lint",
+    "preview": "npm --prefix frontend run preview"
+  }
+}

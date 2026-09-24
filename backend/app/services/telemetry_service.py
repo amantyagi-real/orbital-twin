@@ -24,6 +24,8 @@ class TelemetryService:
         self.is_running = True
         self.speed_multiplier = 1.0
         self.mission_elapsed_seconds = 3648240  # 42 days, 5 hours, etc.
+        self.is_loop_running = False
+        self._last_tick_time = datetime.utcnow()
         
         # Buffers
         self.history: deque = deque(maxlen=300)
@@ -36,6 +38,9 @@ class TelemetryService:
         
         # Initial nominal event
         self._record_event("INFO", "MISSION START", "Orbital Twin simulation engine initialized in nominal baseline mode.", "SYSTEM")
+        
+        # Immediate initial tick so state and ML predictions are pre-populated on cold start
+        self._process_tick(1.0)
 
     def _record_event(self, severity: str, title: str, description: str, subsystem: str = "SYSTEM"):
         event = {
@@ -70,6 +75,7 @@ class TelemetryService:
         self.latest_rul.clear()
         self.last_stage = "NORMAL"
         self._record_event("SUCCESS", "SYSTEM RESET", "Spacecraft digital twin state restored to nominal factory baseline.", "SYSTEM")
+        self._process_tick(0.0)
 
     def trigger_scenario(self, scenario_name: str) -> Dict[str, Any]:
         scenario_clean = scenario_name.strip().upper()
@@ -88,12 +94,8 @@ class TelemetryService:
         self._record_event(sev, f"SCENARIO INJECTED: {scenario_clean}", f"Operator triggered {scenario_clean} degradation sequence.", sub)
         return {"status": "SUCCESS", "active_scenario": scenario_clean}
 
-    async def tick(self):
-        """Advances simulation by 1 step, executes ML models, and broadcasts telemetry."""
-        if not self.is_running:
-            return
-
-        dt = 1.0 * self.speed_multiplier
+    def _process_tick(self, dt: float) -> Dict[str, Any]:
+        """Synchronously step simulation, execute ML pipelines, and update state buffers."""
         self.mission_elapsed_seconds += int(dt)
         
         # 1. Physics Engine Step
@@ -118,7 +120,6 @@ class TelemetryService:
         
         # Manage active anomaly list
         if anomaly_res["anomaly_detected"]:
-            # Check if this anomaly already logged
             if not any(a["subsystem"] == anomaly_res["subsystem"] for a in self.active_anomalies):
                 new_anomaly = {
                     "id": len(self.active_anomalies) + 1,
@@ -154,7 +155,7 @@ class TelemetryService:
 
         # 5. RUL Estimation
         self.latest_rul = rul_estimator.estimate_components(raw_telemetry)
-        raw_telemetry["rul_hours"] = self.latest_rul["components"]["Battery"]["estimated_rul_hours"]
+        raw_telemetry["rul_hours"] = self.latest_rul.get("components", {}).get("Battery", {}).get("estimated_rul_hours", 480.0)
         
         # Metadata
         raw_telemetry["timestamp"] = datetime.utcnow().isoformat()
@@ -165,28 +166,41 @@ class TelemetryService:
         
         # Save to buffer
         self.history.append(raw_telemetry)
+        return raw_telemetry
 
-        # 6. Broadcast over WebSocket
-        packet = {
-            "type": "TELEMETRY_UPDATE",
-            "telemetry": raw_telemetry,
-            "anomalies": self.active_anomalies[:5],
-            "predictions": self.latest_predictions,
-            "rul": self.latest_rul,
-            "latest_event": self.timeline_events[0] if self.timeline_events else None
-        }
-        await connection_manager.broadcast(packet)
+    async def tick(self):
+        """Advances simulation by 1 step, executes ML models, and broadcasts telemetry."""
+        if not self.is_running:
+            return
+
+        dt = 1.0 * self.speed_multiplier
+        raw_telemetry = self._process_tick(dt)
+
+        # Broadcast over WebSocket if active connections exist
+        if connection_manager.active_connections:
+            packet = {
+                "type": "TELEMETRY_UPDATE",
+                "telemetry": raw_telemetry,
+                "anomalies": self.active_anomalies[:5],
+                "predictions": self.latest_predictions,
+                "rul": self.latest_rul,
+                "latest_event": self.timeline_events[0] if self.timeline_events else None
+            }
+            await connection_manager.broadcast(packet)
 
     def get_latest_state(self) -> Dict[str, Any]:
-        """Returns the full unified digital twin state."""
+        """Returns the full unified digital twin state, advancing on-demand if serverless."""
         if not self.history:
-            res = self.physics.step(0.0)
-            res["operating_mode"] = self.scenario_mgr.active_scenario
-            res["anomalies"] = self.active_anomalies
-            res["predictions"] = self.latest_predictions
-            res["rul"] = self.latest_rul
-            res["recent_events"] = self.timeline_events[:10]
-            return res
+            self._process_tick(1.0)
+            
+        # In serverless execution where no background loop runs, advance step if sufficient time elapsed
+        if not self.is_loop_running and self.is_running:
+            now = datetime.utcnow()
+            dt_elapsed = (now - self._last_tick_time).total_seconds()
+            step_threshold = max(0.2, 1.0 / self.speed_multiplier)
+            if dt_elapsed >= step_threshold:
+                self._process_tick(min(5.0, dt_elapsed * self.speed_multiplier))
+                self._last_tick_time = now
             
         latest = copy.deepcopy(self.history[-1])
         latest["anomalies"] = self.active_anomalies

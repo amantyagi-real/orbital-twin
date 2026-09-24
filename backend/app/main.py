@@ -9,22 +9,29 @@ from backend.app.websocket.connection_manager import connection_manager
 from backend.app.services.telemetry_service import telemetry_service
 from backend.app.database.connection import Base, engine
 
-# Initialize database schema
-Base.metadata.create_all(bind=engine)
+# Initialize database schema safely
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"Database schema initialization warning: {e}")
 
 simulation_task = None
 
 async def simulation_loop():
     """Continuous background loop stepping simulation and broadcasting telemetry."""
     print("ORBITAL TWIN: Continuous telemetry streaming loop started.")
-    while True:
-        try:
-            await telemetry_service.tick()
-        except Exception as e:
-            print(f"Error in telemetry loop: {e}")
-        # Sleep 1.0s adjusted for speed multiplier
-        sleep_time = max(0.1, 1.0 / telemetry_service.speed_multiplier)
-        await asyncio.sleep(sleep_time)
+    telemetry_service.is_loop_running = True
+    try:
+        while True:
+            try:
+                await telemetry_service.tick()
+            except Exception as e:
+                print(f"Error in telemetry loop: {e}")
+            # Sleep 1.0s adjusted for speed multiplier
+            sleep_time = max(0.1, 1.0 / telemetry_service.speed_multiplier)
+            await asyncio.sleep(sleep_time)
+    finally:
+        telemetry_service.is_loop_running = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,7 +64,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount REST routes
+# Root service status endpoint
+@app.get("/")
+def get_service_root():
+    return {
+        "service": settings.APP_NAME,
+        "version": settings.APP_VERSION,
+        "status": "ONLINE",
+        "description": "AI-Powered Spacecraft Digital Twin & Mission Intelligence Platform",
+        "docs": "/docs",
+        "health": "/api/health"
+    }
+
+# Mount REST routes:
+# 1. Under '/api' for standard client calls and reverse proxies
+# 2. At root for serverless/servlet gateways where '/api' path may be stripped
+app.include_router(api_router, prefix="/api")
 app.include_router(api_router)
 
 # Mount WebSocket endpoint

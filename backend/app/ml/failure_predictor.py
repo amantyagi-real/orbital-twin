@@ -35,7 +35,10 @@ class FailurePredictor:
 
     def __init__(self, model_dir: str = None):
         self.model_dir = model_dir or os.path.join(settings.MODELS_DIR, "failure")
-        os.makedirs(self.model_dir, exist_ok=True)
+        try:
+            os.makedirs(self.model_dir, exist_ok=True)
+        except OSError:
+            pass
         self.model_path = os.path.join(self.model_dir, "xgboost_failure.joblib")
         
         self.models: Dict[str, xgb.XGBClassifier] = {}
@@ -191,10 +194,12 @@ class FailurePredictor:
             }
             
         # Serialize
-        joblib.dump({"models": self.models, "importances": self.feature_importances}, self.model_path)
+        try:
+            joblib.dump({"models": self.models, "importances": self.feature_importances}, self.model_path)
+            print(f"FailurePredictor: Trained and saved multi-subsystem XGBoost models to {self.model_path}")
+        except OSError as e:
+            print(f"FailurePredictor: Warning - could not write model to disk ({e}). Keeping model in-memory.")
         self.is_ready = True
-        print(f"FailurePredictor: Trained and saved multi-subsystem XGBoost models to {self.model_path}")
-        
         return {
             "status": "ONLINE",
             "algorithm": "XGBoost Gradient Boosted Trees",
