@@ -1,8 +1,13 @@
 {
-  "version": 2,
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "npm --prefix frontend install",
-  "buildCommand": "npm --prefix frontend run build",
+  "buildCommand": "npm --prefix frontend run build && rm -rf frontend/node_modules",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/index.py": {
+      "excludeFiles": "{frontend/node_modules/**,spacecraft-digital-twin-data/**,docs/**,models/*.npy}"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
