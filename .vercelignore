@@ -1,5 +1,3 @@
-frontend/node_modules
-frontend/src
 .venv
 spacecraft-digital-twin-data
 docs
